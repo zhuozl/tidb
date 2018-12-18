@@ -236,7 +236,7 @@ commit-timeout = "41s"
 
 max-batch-size = 128
 tikv-heavy-load-to-batch = 100
-batch-wait-time = 1000000
+batch-wait-time = 2000000
 batch-wait-size = 8
 
 # The max time a Txn may use (in seconds) from its startTS to commitTS.

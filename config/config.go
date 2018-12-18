@@ -339,7 +339,7 @@ var defaultConf = Config{
 
 		MaxBatchSize:         128,
 		TiKVHeavyLoadToBatch: 100,
-		BatchWaitTime:        1000 * time.Microsecond,
+		BatchWaitTime:        2000 * time.Microsecond,
 		BatchWaitSize:        8,
 
 		MaxTxnTimeUse: 590,
