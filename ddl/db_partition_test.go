@@ -1019,8 +1019,6 @@ func (s *testIntegrationSuite) TestPartitionCancelAddIndex(c *C) {
 	var checkErr error
 	var c3IdxInfo *model.IndexInfo
 	hook := &ddl.TestDDLCallback{}
-	oldReorgWaitTimeout := ddl.ReorgWaitTimeout
-	ddl.ReorgWaitTimeout = 10 * time.Millisecond
 	hook.OnJobUpdatedExported, c3IdxInfo, checkErr = backgroundExecOnJobUpdatedExported(c, s.store, s.ctx, hook)
 	s.dom.DDL().(ddl.DDLForTest).SetHook(hook)
 	done := make(chan error, 1)
@@ -1065,7 +1063,6 @@ LOOP:
 	checkDelRangeDone(c, s.ctx, idx)
 
 	tk.MustExec("drop table t1")
-	ddl.ReorgWaitTimeout = oldReorgWaitTimeout
 	callback := &ddl.TestDDLCallback{}
 	s.dom.DDL().(ddl.DDLForTest).SetHook(callback)
 }
@@ -1073,7 +1070,6 @@ LOOP:
 func backgroundExecOnJobUpdatedExported(c *C, store kv.Storage, ctx sessionctx.Context, hook *ddl.TestDDLCallback) (func(*model.Job), *model.IndexInfo, error) {
 	var checkErr error
 	first := true
-	ddl.ReorgWaitTimeout = 10 * time.Millisecond
 	c3IdxInfo := &model.IndexInfo{}
 	hook.OnJobUpdatedExported = func(job *model.Job) {
 		addIndexNotFirstReorg := job.Type == model.ActionAddIndex && job.SchemaState == model.StateWriteReorganization && job.SnapshotVer != 0
@@ -1109,7 +1105,12 @@ func backgroundExecOnJobUpdatedExported(c *C, store kv.Storage, ctx sessionctx.C
 			return
 		}
 		jobIDs := []int64{job.ID}
-		errs, err := admin.CancelJobs(hookCtx.Txn(true), jobIDs)
+		txn, err := hookCtx.Txn(true)
+		if err != nil {
+			checkErr = errors.Trace(err)
+			return
+		}
+		errs, err := admin.CancelJobs(txn, jobIDs)
 		if err != nil {
 			checkErr = errors.Trace(err)
 			return
@@ -1119,7 +1120,12 @@ func backgroundExecOnJobUpdatedExported(c *C, store kv.Storage, ctx sessionctx.C
 			checkErr = errors.Trace(errs[0])
 			return
 		}
-		err = hookCtx.Txn(true).Commit(context.Background())
+		txn, err = hookCtx.Txn(true)
+		if err != nil {
+			checkErr = errors.Trace(err)
+			return
+		}
+		err = txn.Commit(context.Background())
 		if err != nil {
 			checkErr = errors.Trace(err)
 		}
