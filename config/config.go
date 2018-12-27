@@ -340,8 +340,8 @@ var defaultConf = Config{
 		CommitTimeout:        "41s",
 
 		MaxBatchSize:         128,
-		TiKVHeavyLoadToBatch: 100,
-		BatchWaitTime:        1000 * time.Microsecond,
+		TiKVHeavyLoadToBatch: 200,
+		BatchWaitTime:        200 * time.Microsecond,
 		BatchWaitSize:        8,
 
 		MaxTxnTimeUse: 590,

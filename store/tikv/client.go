@@ -320,18 +320,23 @@ func (a *connArray) batchSendLoop(cfg config.TiKVClient) {
 		inHeavyLoad := uint(tikvTransportLayerLoad) >= cfg.TiKVHeavyLoadToBatch // Need to wait.
 
 		batchWaitSize := cfg.BatchWaitSize
+		batchWaitTime := cfg.BatchWaitTime
+		maxWaitTime := 2000 * time.Microsecond
 		factor := 1.25
-		for {
-			// Choose best batchWaitSize.
+		for batchWaitSize < cfg.MaxBatchSize && batchWaitTime < maxWaitTime {
+			// Choose best batchWaitSize and batchWaitTime.
 			if float64(tikvTransportLayerLoad) < float64(cfg.TiKVHeavyLoadToBatch)*factor {
 				break
 			}
 			batchWaitSize <<= 1
+			batchWaitTime <<= 1
 			factor *= 1.25
-			if batchWaitSize >= cfg.MaxBatchSize {
-				batchWaitSize = cfg.MaxBatchSize
-				break
-			}
+		}
+		if batchWaitSize > cfg.MaxBatchSize {
+			batchWaitSize = cfg.MaxBatchSize
+		}
+		if batchWaitTime > maxWaitTime {
+			batchWaitTime = maxWaitTime
 		}
 
 		entries = entries[:0]
