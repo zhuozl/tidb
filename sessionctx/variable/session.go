@@ -100,6 +100,7 @@ func (r *RetryInfo) GetCurrAutoIncrementID() (int64, error) {
 // TransactionContext is used to store variables that has transaction scope.
 type TransactionContext struct {
 	ForUpdate     bool
+	forUpdateTS   uint64
 	DirtyDB       interface{}
 	Binlog        interface{}
 	InfoSchema    interface{}
@@ -108,6 +109,7 @@ type TransactionContext struct {
 	StartTS       uint64
 	Shard         *int64
 	TableDeltaMap map[int64]TableDelta
+	IsPessimistic bool
 
 	// For metrics.
 	CreateTime     time.Time
@@ -143,6 +145,21 @@ func (tc *TransactionContext) Cleanup() {
 // ClearDelta clears the delta map.
 func (tc *TransactionContext) ClearDelta() {
 	tc.TableDeltaMap = nil
+}
+
+// GetForUpdateTS returns the ts for update.
+func (tc *TransactionContext) GetForUpdateTS() uint64 {
+	if tc.forUpdateTS > tc.StartTS {
+		return tc.forUpdateTS
+	}
+	return tc.StartTS
+}
+
+// SetForUpdateTS sets the ts for update.
+func (tc *TransactionContext) SetForUpdateTS(forUpdateTS uint64) {
+	if forUpdateTS > tc.forUpdateTS {
+		tc.forUpdateTS = forUpdateTS
+	}
 }
 
 // WriteStmtBufs can be used by insert/replace/delete/update statement.
@@ -356,6 +373,12 @@ type SessionVars struct {
 
 	// EnableFastAnalyze indicates whether to take fast analyze.
 	EnableFastAnalyze bool
+
+	// TxnMode indicates should be pessimistic or optimistic.
+	TxnMode string
+
+	// LowResolutionTSO is used for reading data with low resolution TSO which is updated once every two seconds.
+	LowResolutionTSO bool
 }
 
 // ConnectionInfo present connection used by audit.
@@ -659,7 +682,7 @@ func (s *SessionVars) SetSystemVar(name string, val string) error {
 		if err != nil {
 			return err
 		}
-	case AutocommitVar:
+	case AutoCommit:
 		isAutocommit := TiDBOptOn(val)
 		s.SetStatusFlag(mysql.ServerStatusAutocommit, isAutocommit)
 		if isAutocommit {
@@ -699,6 +722,8 @@ func (s *SessionVars) SetSystemVar(name string, val string) error {
 		s.IndexSerialScanConcurrency = tidbOptPositiveInt32(val, DefIndexSerialScanConcurrency)
 	case TiDBBackoffLockFast:
 		s.KVVars.BackoffLockFast = tidbOptPositiveInt32(val, kv.DefBackoffLockFast)
+	case TiDBBackOffWeight:
+		s.KVVars.BackOffWeight = tidbOptPositiveInt32(val, kv.DefBackOffWeight)
 	case TiDBConstraintCheckInPlace:
 		s.ConstraintCheckInPlace = TiDBOptOn(val)
 	case TiDBBatchInsert:
@@ -769,8 +794,28 @@ func (s *SessionVars) SetSystemVar(name string, val string) error {
 		s.EnableFastAnalyze = TiDBOptOn(val)
 	case TiDBWaitTableSplitFinish:
 		s.WaitTableSplitFinish = TiDBOptOn(val)
+	case TiDBTxnMode:
+		if err := s.setTxnMode(val); err != nil {
+			return err
+		}
+	case TiDBLowResolutionTSO:
+		s.LowResolutionTSO = TiDBOptOn(val)
 	}
 	s.systems[name] = val
+	return nil
+}
+
+func (s *SessionVars) setTxnMode(val string) error {
+	switch strings.ToUpper(val) {
+	case ast.Pessimistic:
+		s.TxnMode = ast.Pessimistic
+	case ast.Optimistic:
+		s.TxnMode = ast.Optimistic
+	case "":
+		s.TxnMode = ""
+	default:
+		return ErrWrongValueForVar.FastGenByArgs(TiDBTxnMode, val)
+	}
 	return nil
 }
 
@@ -789,7 +834,6 @@ func SetLocalSystemVar(name string, val string) {
 // special session variables.
 const (
 	SQLModeVar           = "sql_mode"
-	AutocommitVar        = "autocommit"
 	CharacterSetResults  = "character_set_results"
 	MaxAllowedPacket     = "max_allowed_packet"
 	TimeZone             = "time_zone"
